@@ -1,0 +1,93 @@
+name: Build Multi-Platform
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux desktop (x86_64)
+          - platform: 'ubuntu-22.04'
+            target: ''
+            build-args: ''
+          # Windows (x86_64)
+          - platform: 'windows-latest'
+            target: ''
+            build-args: ''
+          # macOS (Apple Silicon)
+          - platform: 'macos-latest'
+            target: 'aarch64-apple-darwin'
+            build-args: '--target aarch64-apple-darwin'
+          # macOS (Intel)
+          - platform: 'macos-latest'
+            target: 'x86_64-apple-darwin'
+            build-args: '--target x86_64-apple-darwin'
+          # Android (ARM64)
+          - platform: 'ubuntu-22.04'
+            target: 'aarch64-linux-android'
+            build-args: '--target aarch64-linux-android'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: setup Android SDK (Android builds)
+        if: matrix.target == 'aarch64-linux-android'
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 31
+          ndk-version: 26.1.10909125
+
+      - name: setup Android environment variables
+        if: matrix.target == 'aarch64-linux-android'
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: install Linux dependencies (Linux desktop only)
+        if: matrix.platform == 'ubuntu-22.04' && matrix.target == ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: install frontend dependencies
+        run: bun install
+
+      - name: build frontend
+        run: bun run build
+
+      - name: build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.build-args }}
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-${{ matrix.target || 'default' }}
+          path: |
+            src-tauri/target/release/bundle/
+            src-tauri/target/aarch64-linux-android/release/
+          if-no-files-found: ignore

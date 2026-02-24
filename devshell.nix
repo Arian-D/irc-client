@@ -51,13 +51,13 @@
 
 pkgs.mkShell {
   buildInputs = with pkgs; [
-    # rustfmt
-    # clippy
-    # rust-analyzer
-    # toolchain
-    # trunk
+    rustfmt
+    clippy
+    rust-analyzer
+    toolchain
+    trunk
 
-    amp-sandboxed.config.script
+    #amp-sandboxed.config.script
   ];
 
   RUST_BACKTRACE = 1;

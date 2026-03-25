@@ -34,7 +34,7 @@ pub fn App() -> impl IntoView {
 
             let args = serde_wasm_bindgen::to_value(&MessageArgs { message: &name }).unwrap();
             // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-            let new_msg = invoke("greet", args).await.as_string().unwrap();
+            let new_msg = invoke("send", args).await.as_string().unwrap();
             set_msg.set(new_msg);
         });
     };

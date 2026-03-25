@@ -1,8 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn send(user: &str, message: &str) -> String {
-    dbg!("Sent the message {message} as {user}!");
-    format!("{user}: {message}")
+    format!("{}: {}", dbg!(user), dbg!(message))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

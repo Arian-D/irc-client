@@ -26,4 +26,7 @@ If you hate yourself,
 - Code
 
 ## Resources
+- https://datatracker.ietf.org/doc/html/rfc1459
+- https://ircv3.net/
+- https://www.irchelp.org/
 - https://tauri.app/develop/calling-rust/

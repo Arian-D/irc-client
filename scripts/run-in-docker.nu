@@ -12,9 +12,9 @@ podman build -t $image_name -f dev.Dockerfile .
 (podman run
   --rm
   -it
-  --entrypoint bash
   -e XDG_RUNTIME_DIR=/tmp
   -e WAYLAND_DISPLAY
   -v ($env.XDG_RUNTIME_DIR | path join $env.WAYLAND_DISPLAY):/tmp/($env.WAYLAND_DISPLAY)
   -v (pwd):/app
-  irc-client)
+  irc-client
+  cargo tauri dev)

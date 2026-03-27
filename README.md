@@ -24,3 +24,6 @@ If you hate yourself,
 - Install nix and enable flakes
 - `nix develop .`
 - Code
+
+## Resources
+- https://tauri.app/develop/calling-rust/

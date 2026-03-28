@@ -2,6 +2,7 @@ use std::io::Read;
 use std::{collections::HashSet, io::Write};
 use std::net::TcpStream;
 use log::{info, debug};
+mod irc;
 
 type Nick = String;
 
@@ -47,8 +48,8 @@ pub fn run() {
     // TODO: Maybe have some proper abstraction over IRC instead of rawdogging TCP???
     if let Ok(mut tcpstream) = TcpStream::connect("irc.libera.chat:6667") {
         println!("{tcpstream:#?}");
-        let init = user_init(&mut tcpstream, "veryuniquser");
-        println!("{:#?}", init);
+        // let init = user_init(&mut tcpstream, "veryuniquser");
+        // println!("{:#?}", init);
 
         tauri::Builder::default()
             .plugin(tauri_plugin_opener::init())

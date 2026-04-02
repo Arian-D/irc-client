@@ -1,4 +1,6 @@
 use std::error::Error;
+use std::fmt;
+use std::fmt::write;
 use std::io::{Read, Write};
 
 /// A stateful struct representing the IRC client
@@ -15,6 +17,7 @@ pub struct Client<'a, T: Read + Write> {
     socket: T,
 }
 
+/// A struct representing IRC internal messages
 #[derive(Debug)]
 struct Message<'a> {
     tags: Option<Vec<&'a str>>,
@@ -25,30 +28,43 @@ struct Message<'a> {
 
 enum Command<'a> {
     /// Nick message: Set nickname
-    Nick(&'a str),
+    Nick { nickname: &'a str },
     /// USER message: Set username and real name
-    User(&'a str, &'a str),
+    User {
+        username: &'a str,
+        real_name: &'a str,
+    },
     /// QUIT the server with an optional message
-    Quit(Option<&'a str>),
+    Quit { message: Option<&'a str> },
     // TODO: Implement passwords
     /// JOIN 1 or more channels.
-    Join(Vec<&'a str>),
+    Join { channels: Vec<&'a str> },
     /// PART message: leave 1 or more channels
-    Part(Vec<&'a str>),
+    Part { channels: Vec<&'a str> },
     /// MODE message: Set the channel or user mode with args
-    Mode(Vec<&'a str>),
+    Mode { params: Vec<&'a str> },
     /// TOPIC message: View or optionally set channel topic
-    Topic(&'a str, Option<&'a str>),
+    Topic {
+        channel: &'a str,
+        topic: Option<&'a str>,
+    },
     /// NAMES: List NICKs, optionally providing channels
-    Names(Vec<&'a str>),
+    Names { channels: Option<Vec<&'a str>> },
     /// LISIT channel names
-    List(Vec<&'a str>),
+    List { channels: Option<Vec<&'a str>> },
     /// INVITE user to channel
-    Invite(&'a str, &'a str),
-    /// KICK: Kick user (2) from channel (1) with optional reason (3)
-    Kick(&'a str, &'a str, Option<&'a str>),
-    /// PRVMSG: Send message (2) to one or more receivers (1)
-    PrivMsg(Vec<&'a str>, String)
+    Invite { user: &'a str, channel: &'a str },
+    /// KICK: Kick user from channel with optional reason
+    Kick {
+        user: &'a str,
+        channel: &'a str,
+        reason: Option<&'a str>,
+    },
+    /// PRVMSG: Send message to one or more receivers
+    PrivMsg {
+        message: &'a str,
+        receivers: Vec<&'a str>,
+    },
     // Commands for later
     // VERSION
     // STATS
@@ -64,37 +80,56 @@ enum Command<'a> {
     // AWAY
 }
 
+impl<'a> Command<'a> {
+    fn commandToMessage(&self) -> Message<'a> {
+        match self {
+            Command::Nick { nickname: nickname } => Message {
+                tags: None,
+                prefix: None,
+                command: "Nick",
+                params: Some(vec![nickname])
+            },
+            _ => todo!("😔"),
+        }
+    }
+}
 
+impl<'a> fmt::Display for Command<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f,
+            "{}",
+            self.commandToMessage()
+        )
+    }
+}
 
-
-impl<'a, T: Read + Write> Client<'a, T> {
-    fn send_raw_command(mut self, message: Message<'_>) {
-        if let Message {
+impl<'a> fmt::Display for Message<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Message {
             tags: _,
             prefix: prefix,
             command: command,
             params: params,
-        } = message
-        {
-            self.socket.write(
-                format!(
-                    "{}{}{}\r\n",
-                    if let Some(prefix) = prefix {
-                        format!(":{prefix} ")
-                    } else {
-                        "".to_string()
-                    },
-                    command,
-                    if let Some(args) = params {
-                        " ".to_string() + &args.join(" ")
-                    } else {
-                        "".to_string()
-                    },
-                )
-                .as_bytes(),
-            );
-        }
+        } = self;
+        write!(
+            f,
+            "{}{command}{}\r\n",
+            if let Some(prefix) = prefix {
+                format!(":{prefix} ")
+            } else {
+                "".to_string()
+            },
+            if let Some(args) = params {
+                " ".to_string() + &args.join(" ")
+            } else {
+                "".to_string()
+            },
+        )
     }
+}
+
+impl<'a, T: Read + Write> Client<'a, T> {
+    fn send_raw_command(mut self, message: Message<'_>) {}
 
     fn user_command(mut self) {
         let nick = self.nick;

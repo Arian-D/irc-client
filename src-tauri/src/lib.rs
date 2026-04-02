@@ -21,8 +21,6 @@ struct AppState {
 
 // https://www.retardmaxx.com/
 fn user_init(socket: &mut TcpStream, user: &str) -> Result<String, Box<dyn std::error::Error>> {
-    socket.write(format!("USER {user} {user} {user} :{user}\n").as_bytes())?;
-    socket.write(format!("NICK {user}").as_bytes())?;
     let mut buffer = String::new();
     socket.read_to_string(&mut buffer)?;
     match buffer {

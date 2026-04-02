@@ -16,6 +16,13 @@ struct MessageArgs<'a> {
 }
 
 #[component]
+fn MessageBubble<'a>(message: &'a str, color: &'a str) -> impl IntoView + use<'a> {
+    view! {
+        <p>{message}</p>
+    }
+}
+
+#[component]
 pub fn App() -> impl IntoView {
     let (name, set_name) = signal(String::new());
     let (msg, set_msg) = signal(String::new());
@@ -34,7 +41,11 @@ pub fn App() -> impl IntoView {
                 return;
             }
 
-            let args = serde_wasm_bindgen::to_value(&MessageArgs { user: HARDCODED_USER, message: &name }).unwrap();
+            let args = serde_wasm_bindgen::to_value(&MessageArgs {
+                user: HARDCODED_USER,
+                message: &name,
+            })
+            .unwrap();
             // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
             let new_msg = invoke("send", args).await.as_string().unwrap();
             set_msg.set(new_msg);

@@ -13,9 +13,8 @@ struct Channel {
     messages: Vec<Message>,
 }
 
-struct AppState {
-    tcp_socket: TcpStream,
-    user_nick: Nick,
+struct AppState<'a> {
+    client: irc::Client<'a, TcpStream>,
     channels: HashSet<Channel>,
 }
 
@@ -29,38 +28,36 @@ fn user_init(socket: &mut TcpStream, user: &str) -> Result<String, Box<dyn std::
             Ok(bytes)
         }
     }
-
 }
 
 /// Send the message
 #[tauri::command]
 fn send(state: tauri::State<AppState>) -> String {
-    let socket = &state.tcp_socket;
+    let socket = &state.client.socket;
     "".to_string()
 }
 
 /// Run the main program
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // TLS considered harmful
-    // TODO: Maybe have some proper abstraction over IRC instead of rawdogging TCP???
-    if let Ok(mut tcpstream) = TcpStream::connect("irc.libera.chat:6667") {
-        println!("{tcpstream:#?}");
-        // let init = user_init(&mut tcpstream, "veryuniquser");
-        // println!("{:#?}", init);
+    // T
+    let mut tcpstream = TcpStream::connect("irc.libera.chat:6667").unwrap();
+    // let init = user_init(&mut tcpstream, "veryuniquser");
+    // println!("{:#?}", init);
 
-        tauri::Builder::default()
-            .plugin(tauri_plugin_opener::init())
-            .manage(AppState {
-                channels: HashSet::new(),
-                user_nick: String::new(),
-                tcp_socket: tcpstream,
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .manage(AppState {
+            channels: HashSet::new(),
+            client: irc::Client {
+                server: "irc.libera.chat:6667",
+                nick: "uniquenick",
+                real_name: None,
+                socket: tcpstream,
+            },
 
-            })
-            .invoke_handler(tauri::generate_handler![send])
-            .run(tauri::generate_context!())
-            .expect("error while running tauri application");
-    } else {
-        todo!("Do some error handling.")
-    }
+        })
+        .invoke_handler(tauri::generate_handler![send])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

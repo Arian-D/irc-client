@@ -4,17 +4,18 @@ use std::fmt::write;
 use std::io::{Read, Write};
 
 /// A stateful struct representing the IRC client
+#[derive(Debug)]
 pub struct Client<'a, T: Read + Write> {
     /// Server URI
-    server: &'a str,
+    pub server: &'a str,
     /// Nickname
-    nick: &'a str,
+    pub nick: &'a str,
     /// Real name with spaces. Optional.
-    real_name: Option<&'a str>,
+    pub real_name: Option<&'a str>,
     /// The IRC socket. It's most likely raw TCP or a TLS-wrapped one,
     /// but ¶8.1.1 from the RFC says that it could be a unix socket as
     /// well.
-    socket: T,
+    pub socket: T,
 }
 
 /// A struct representing IRC internal messages
@@ -26,6 +27,7 @@ struct Message<'a> {
     params: Option<Vec<&'a str>>,
 }
 
+#[derive(Debug)]
 enum Command<'a> {
     /// Nick message: Set nickname
     Nick { nickname: &'a str },
@@ -81,12 +83,12 @@ enum Command<'a> {
 }
 
 impl<'a> Command<'a> {
-    fn commandToMessage(&self) -> Message<'a> {
+    fn command_to_message(&self) -> Message<'a> {
         match self {
             Command::Nick { nickname: nickname } => Message {
                 tags: None,
                 prefix: None,
-                command: "Nick",
+                command: "NICK",
                 params: Some(vec![nickname])
             },
             _ => todo!("😔"),
@@ -98,7 +100,7 @@ impl<'a> fmt::Display for Command<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f,
             "{}",
-            self.commandToMessage()
+            self.command_to_message()
         )
     }
 }
@@ -140,6 +142,14 @@ impl<'a, T: Read + Write> Client<'a, T> {
             command: "USER",
             params: Some(vec![nick, "_", "_", name.unwrap_or(nick)]),
         })
+    }
+
+    fn read_response(&mut self) {
+        // Based on the RFC
+        let mut buffer = vec![0; 512];
+        while let Ok(_) = self.socket.read_exact(&mut buffer) {
+            println!("{buffer:#?}");
+        }
     }
 
     fn nick_command(mut self) {

@@ -1,7 +1,12 @@
+use leptos::attr::NextAttribute;
+use leptos::math::Mover;
 use leptos::task::spawn_local;
 use leptos::{ev::SubmitEvent, prelude::*};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+
+use crate::components::input::ChatInput;
+use crate::components::message::MessageBubble;
 
 #[wasm_bindgen]
 extern "C" {
@@ -15,55 +20,82 @@ struct MessageArgs<'a> {
     message: &'a str,
 }
 
-#[component]
-fn MessageBubble<'a>(message: &'a str, color: &'a str) -> impl IntoView + use<'a> {
-    view! {
-        <p>{message}</p>
-    }
+#[derive(Clone, Debug)]
+struct MessageData {
+    id: usize,
+    user: String,
+    content: String,
+    is_self: bool,
 }
 
 #[component]
 pub fn App() -> impl IntoView {
-    let (name, set_name) = signal(String::new());
-    let (msg, set_msg) = signal(String::new());
-    const HARDCODED_USER: &str = "Luke Smith";
+    let (server_status, set_server_status) = signal(String::new());
+    const HARDCODED_USER: &str = "Truecel Chud";
 
-    let update_name = move |ev| {
-        let v = event_target_value(&ev);
-        set_name.set(v);
-    };
+    let (history, set_history) = signal(vec![MessageData {
+        id: 0,
+        user: "System".to_string(),
+        content: "Welcome to VeryChat!".to_string(),
+        is_self: false,
+    }]);
 
-    let send = move |ev: SubmitEvent| {
-        ev.prevent_default();
+    let (next_id, set_next_id) = signal(1);
+
+    let process_message = Callback::new(move |text: String| {
         spawn_local(async move {
-            let name = name.get_untracked();
-            if name.is_empty() {
-                return;
-            }
+            //generate unique id for new message
+            let current_id = next_id.get_untracked();
+            set_next_id.update(|id| *id += 1);
 
+            //prepare tauri args
             let args = serde_wasm_bindgen::to_value(&MessageArgs {
                 user: HARDCODED_USER,
-                message: &name,
+                message: &text,
             })
             .unwrap();
-            // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-            let new_msg = invoke("send", args).await.as_string().unwrap();
-            set_msg.set(new_msg);
-        });
-    };
+
+            //call backend
+            let response = invoke("send", args).await.as_string().unwrap();
+            set_server_status.set(response);
+
+            //update history
+            set_history.update(|h| {
+                h.push(MessageData {
+                    id: current_id,
+                    user: HARDCODED_USER.to_string(),
+                    content: text,
+                    is_self: true,
+                });
+            });
+        })
+    });
+
     // TODO: Add channel name to the textbox placeholder
     view! {
         <main class="container">
             <h1>"VeryChat"</h1>
-            <form class="row" on:submit=send>
-                <input
-                    id="greet-input"
-                    placeholder="Message"
-                    on:input=update_name
+
+            <div class="chat-history">
+                <For
+                    each=move || history.get()
+                    key=|msg: &MessageData| msg.id
+                    children=|msg: MessageData| {
+                        view! {
+                            <MessageBubble
+                                name=msg.user.clone()
+                                content=msg.content.clone()
+                                is_self=msg.is_self
+                            />
+                        }
+                    }
                 />
-                <button type="submit">"▶"</button>
-            </form>
-            <p>{ move || msg.get() }</p>
+            </div>
+
+            <ChatInput on_send=process_message />
+            <p style="font-size: 0.8rem; color: gray; margin-top: 10px;">
+                { move || server_status.get() }
+            </p>
         </main>
     }
 }

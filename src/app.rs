@@ -1,31 +1,18 @@
 use leptos::attr::NextAttribute;
 use leptos::math::Mover;
+use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos::{ev::SubmitEvent, prelude::*};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::components::input::ChatInput;
-use crate::components::message::MessageBubble;
+use crate::components::message_list::MessageList;
+use crate::types::{MessageArgs, MessageData};
 
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"])]
     async fn invoke(cmd: &str, args: JsValue) -> JsValue;
-}
-
-#[derive(Serialize, Deserialize)]
-struct MessageArgs<'a> {
-    user: &'a str,
-    message: &'a str,
-}
-
-#[derive(Clone, Debug)]
-struct MessageData {
-    id: usize,
-    user: String,
-    content: String,
-    is_self: bool,
 }
 
 #[component]
@@ -76,21 +63,7 @@ pub fn App() -> impl IntoView {
         <main class="container">
             <h1>"VeryChat"</h1>
 
-            <div class="chat-history">
-                <For
-                    each=move || history.get()
-                    key=|msg: &MessageData| msg.id
-                    children=|msg: MessageData| {
-                        view! {
-                            <MessageBubble
-                                name=msg.user.clone()
-                                content=msg.content.clone()
-                                is_self=msg.is_self
-                            />
-                        }
-                    }
-                />
-            </div>
+            <MessageList history />
 
             <ChatInput on_send=process_message />
             <p style="font-size: 0.8rem; color: gray; margin-top: 10px;">

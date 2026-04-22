@@ -1,11 +1,20 @@
+use serde::de::SeqAccess;
 use std::error::Error;
 use std::fmt;
 use std::fmt::write;
 use std::io::{Read, Write};
+use winnow::ascii::*;
+use winnow::combinator::*;
+use winnow::prelude::*;
+use winnow::token::*;
+use winnow::Result;
 
 /// A stateful struct representing the IRC client
 #[derive(Debug)]
-pub struct Client<'a, T: Read + Write> {
+pub struct Client<'a, Socket>
+where
+    Socket: Read + Write,
+{
     /// Server URI
     pub server: &'a str,
     /// Nickname
@@ -15,18 +24,21 @@ pub struct Client<'a, T: Read + Write> {
     /// The IRC socket. It's most likely raw TCP or a TLS-wrapped one,
     /// but ¶8.1.1 from the RFC says that it could be a unix socket as
     /// well.
-    pub socket: T,
+    pub socket: Socket,
+    /// Auth
+    pub auth: Auth<'a>,
 }
 
-/// A struct representing IRC internal messages
+/// A struct encapsulating IRC internal message information
 #[derive(Debug)]
 struct Message<'a> {
     tags: Option<Vec<&'a str>>,
-    prefix: Option<&'a str>,
+    source: Option<&'a str>,
     command: &'a str,
     params: Option<Vec<&'a str>>,
 }
 
+/// An enum of all IRC commands
 #[derive(Debug)]
 enum Command<'a> {
     /// Nick message: Set nickname
@@ -38,7 +50,7 @@ enum Command<'a> {
     },
     /// QUIT the server with an optional message
     Quit { message: Option<&'a str> },
-    // TODO: Implement passwords
+    // TODO: Implement PASS
     /// JOIN 1 or more channels.
     Join { channels: Vec<&'a str> },
     /// PART message: leave 1 or more channels
@@ -87,9 +99,9 @@ impl<'a> Command<'a> {
         match self {
             Command::Nick { nickname: nickname } => Message {
                 tags: None,
-                prefix: None,
+                source: None,
                 command: "NICK",
-                params: Some(vec![nickname])
+                params: Some(vec![nickname]),
             },
             _ => todo!("😔"),
         }
@@ -98,18 +110,16 @@ impl<'a> Command<'a> {
 
 impl<'a> fmt::Display for Command<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f,
-            "{}",
-            self.command_to_message()
-        )
+        write!(f, "{}", self.command_to_message())
     }
 }
 
 impl<'a> fmt::Display for Message<'a> {
+    /// https://modern.ircdocs.horse/#message-format
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Message {
             tags: _,
-            prefix: prefix,
+            source: prefix,
             command: command,
             params: params,
         } = self;
@@ -130,41 +140,58 @@ impl<'a> fmt::Display for Message<'a> {
     }
 }
 
-impl<'a, T: Read + Write> Client<'a, T> {
-    fn send_raw_command(mut self, message: Message<'_>) {}
-
-    fn user_command(mut self) {
-        let nick = self.nick;
-        let name = self.real_name;
-        self.send_raw_command(Message {
-            tags: None,
-            prefix: None,
-            command: "USER",
-            params: Some(vec![nick, "_", "_", name.unwrap_or(nick)]),
-        })
+impl<'a> Message<'a> {
+    fn parser<'i>(i: &mut &'i str) -> ModalResult<Message<'i>> {
+        seq! {
+            Message {
+                tags: opt(
+                    preceded('@',
+                        separated(
+                            0..,
+                            take_until(0.., ' '),
+                            " "
+                        )
+                    )
+                ),
+                _: space0,
+                source: opt(preceded(':', take_until(0.., ' '))),
+                _: space0,
+                command: alt((alpha1, digit1)),
+                _: space0,
+                params: opt(separated(0.., take_until(0.., '\r'), " ")),
+                _: line_ending,
+            }
+        }
+        .parse_next(i)
     }
+}
 
-    fn read_response(&mut self) {
-        // Based on the RFC
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parsing_source() {
+        let mut input = ":WiZ ";
+        assert_eq!(Message::parse_source(&mut input), Ok(Some("WiZ")))
+    }
+}
+
+impl<'a, T: Read + Write> Client<'a, T> {
+    fn read_from_socket(&mut self) -> String {
+        let mut result: String = String::new();
+        // Based on the ¶8.2
         let mut buffer = vec![0; 512];
         while let Ok(_) = self.socket.read_exact(&mut buffer) {
-            println!("{buffer:#?}");
+            result += str::from_utf8(&buffer).unwrap();
         }
-    }
-
-    fn nick_command(mut self) {
-        let nick = self.nick;
-        self.send_raw_command(Message {
-            tags: None,
-            prefix: None,
-            command: "NICK",
-            params: Some(vec![nick]),
-        })
+        result
     }
 }
 
 /// Authentication method
-enum Auth<'a> {
+#[derive(Debug)]
+pub enum Auth<'a> {
     /// NickServ with Nick and Pass (which may not exist)
     Plain(&'a str, Option<&'a str>),
     /// CertFP authentication. Unsure if this can be used in conjunction with the other, so it might need to be relocated.

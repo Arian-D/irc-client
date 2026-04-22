@@ -1,7 +1,8 @@
+use log::{debug, info};
 use std::io::Read;
-use std::{collections::HashSet, io::Write};
 use std::net::TcpStream;
-use log::{info, debug};
+use std::{collections::HashSet, io::Write};
+use tauri_plugin_store::StoreExt;
 mod irc;
 
 type Nick = String;
@@ -18,18 +19,6 @@ struct AppState<'a> {
     channels: HashSet<Channel>,
 }
 
-// https://www.retardmaxx.com/
-fn user_init(socket: &mut TcpStream, user: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let mut buffer = String::new();
-    socket.read_to_string(&mut buffer)?;
-    match buffer {
-        _ if buffer.is_empty() => Err("🤷".into()),
-        bytes => {
-            Ok(bytes)
-        }
-    }
-}
-
 /// Send the message
 #[tauri::command]
 fn send(state: tauri::State<AppState>) -> String {
@@ -40,22 +29,24 @@ fn send(state: tauri::State<AppState>) -> String {
 /// Run the main program
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // T
-    let mut tcpstream = TcpStream::connect("irc.libera.chat:6667").unwrap();
-    // let init = user_init(&mut tcpstream, "veryuniquser");
-    // println!("{:#?}", init);
-
+    // TODO: Move these into the "store"
+    let temp_nick = "uniquenick";
+    let temp_server = "irc.libera.chat:6667";
+    // TODO: This has to have error handling
+    let tcpstream = TcpStream::connect(temp_server).unwrap();
     tauri::Builder::default()
+        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             channels: HashSet::new(),
+            // TODO: Make this a mutex
             client: irc::Client {
-                server: "irc.libera.chat:6667",
-                nick: "uniquenick",
+                server: temp_server,
+                nick: temp_nick,
                 real_name: None,
                 socket: tcpstream,
+                auth: irc::Auth::Plain(temp_nick, None),
             },
-
         })
         .invoke_handler(tauri::generate_handler![send])
         .run(tauri::generate_context!())

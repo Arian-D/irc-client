@@ -13,3 +13,9 @@ pub struct MessageData {
     pub content: String,
     pub is_self: bool,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NetworkData {
+    pub name: String,
+    pub channels: Vec<String>,
+}

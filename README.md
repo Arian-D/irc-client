@@ -1,8 +1,7 @@
 # VeryChat
 
-Simple IRC client meant to implement [RFC
-1459](https://datatracker.ietf.org/doc/html/rfc1459) and parts of
-[IRCv3](https://ircv3.net/).
+Simple IRC client meant to implement parts of
+[IRCv3](https://modern.ircdocs.horse/).
 
 ## Usage
 TODO
@@ -26,6 +25,7 @@ If you hate yourself,
 - Code
 
 ## Resources
+- https://modern.ircdocs.horse/
 - https://datatracker.ietf.org/doc/html/rfc1459
 - https://ircv3.net/
 - https://www.irchelp.org/

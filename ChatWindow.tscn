@@ -1,0 +1,166 @@
+[gd_scene format=3 uid="uid://chatwindow"]
+
+[ext_resource type="Script" uid="uid://ds8q0sby8n4dr" path="res://Scripts/ChatWindow.gd" id="1"]
+[ext_resource type="Theme" uid="uid://dh7ke582furny" path="res://Other/Theme.tres" id="1_5lvci"]
+[ext_resource type="Script" uid="uid://c3ts7fxfg5qnt" path="res://Scripts/ConnectDialog.gd" id="2"]
+
+[node name="ChatWindow" type="Control" unique_id=1965019423]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_5lvci")
+script = ExtResource("1")
+
+[node name="Background" type="Panel" parent="." unique_id=105828419]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="." unique_id=400815096]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="TopicBar" type="Label" parent="VBox" unique_id=1350899559]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.15551758, 0.203125, 0.203125, 1)
+text = " Very Chat - IRC v3 Chat Application"
+clip_text = true
+
+[node name="HBox" type="HBoxContainer" parent="VBox" unique_id=1249400908]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="TabContainer" type="TabContainer" parent="VBox/HBox" unique_id=1845482865]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="UserListPanel" type="PanelContainer" parent="VBox/HBox" unique_id=1774342723]
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+
+[node name="UserList" type="ItemList" parent="VBox/HBox/UserListPanel" unique_id=1970973781]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="InputRow" type="HBoxContainer" parent="VBox" unique_id=621059761]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+
+[node name="InputField" type="LineEdit" parent="VBox/InputRow" unique_id=927192766]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Type a message or /command..."
+
+[node name="SendBtn" type="Button" parent="VBox/InputRow" unique_id=230365695]
+layout_mode = 2
+text = "  Send  "
+
+[node name="StatusBar" type="Label" parent="VBox" unique_id=221494069]
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 2
+text = "Not connected"
+
+[node name="ConnectDialog" type="Window" parent="." unique_id=160616510]
+oversampling_override = 1.0
+title = "Connect to IRC"
+position = Vector2i(0, 36)
+size = Vector2i(420, 275)
+visible = false
+script = ExtResource("2")
+
+[node name="Panel" type="Panel" parent="ConnectDialog" unique_id=145854506]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="ConnectDialog" unique_id=2138442152]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = 9.0
+offset_right = -12.0
+offset_bottom = -2.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Grid" type="GridContainer" parent="ConnectDialog/VBox" unique_id=1396860964]
+layout_mode = 2
+columns = 2
+
+[node name="ServerLabel" type="Label" parent="ConnectDialog/VBox/Grid" unique_id=773018902]
+layout_mode = 2
+text = "Server:"
+
+[node name="ServerField" type="LineEdit" parent="ConnectDialog/VBox/Grid" unique_id=1292851185]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PortLabel" type="Label" parent="ConnectDialog/VBox/Grid" unique_id=211534860]
+layout_mode = 2
+text = "Port:"
+
+[node name="PortField" type="SpinBox" parent="ConnectDialog/VBox/Grid" unique_id=455681944]
+layout_mode = 2
+min_value = 1.0
+max_value = 65535.0
+value = 6667.0
+
+[node name="NickLabel" type="Label" parent="ConnectDialog/VBox/Grid" unique_id=493349976]
+layout_mode = 2
+text = "Nickname:"
+
+[node name="NickField" type="LineEdit" parent="ConnectDialog/VBox/Grid" unique_id=2087518663]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="UserLabel" type="Label" parent="ConnectDialog/VBox/Grid" unique_id=1560233980]
+layout_mode = 2
+text = "Username:"
+
+[node name="UserField" type="LineEdit" parent="ConnectDialog/VBox/Grid" unique_id=1595281283]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="RealLabel" type="Label" parent="ConnectDialog/VBox/Grid" unique_id=179479098]
+layout_mode = 2
+text = "Real name:"
+
+[node name="RealField" type="LineEdit" parent="ConnectDialog/VBox/Grid" unique_id=661637081]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PassLabel" type="Label" parent="ConnectDialog/VBox/Grid" unique_id=377447355]
+layout_mode = 2
+text = "Password:"
+
+[node name="PassField" type="LineEdit" parent="ConnectDialog/VBox/Grid" unique_id=1044362188]
+layout_mode = 2
+size_flags_horizontal = 3
+secret = true
+
+[node name="ConnectBtn" type="Button" parent="ConnectDialog/VBox" unique_id=2076950489]
+layout_mode = 2
+text = "Connect"
+
+[node name="ErrorLabel" type="Label" parent="ConnectDialog/VBox" unique_id=845080356]
+modulate = Color(1, 0.3, 0.3, 1)
+layout_mode = 2

@@ -30,7 +30,7 @@ where
 }
 
 /// A struct encapsulating IRC internal message information
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct Message<'a> {
     tags: Option<Vec<&'a str>>,
     source: Option<&'a str>,
@@ -158,7 +158,7 @@ impl<'a> Message<'a> {
                 _: space0,
                 command: alt((alpha1, digit1)),
                 _: space0,
-                params: opt(separated(0.., take_until(0.., '\r'), " ")),
+                params: opt(separated(0.., take_till(0.., |it| matches!(it, ' ' | '\r' | '\n')), " ")),
                 _: line_ending,
             }
         }
@@ -172,8 +172,13 @@ mod tests {
 
     #[test]
     fn test_parsing_source() {
-        let mut input = ":WiZ ";
-        assert_eq!(Message::parse_source(&mut input), Ok(Some("WiZ")))
+        let mut input = "JOIN #foobar";
+        assert_eq!(Message::parser(&mut input), Ok(Message {
+            tags: None,
+            source: None,
+            command: "",
+            params: None
+        }))
     }
 }
 

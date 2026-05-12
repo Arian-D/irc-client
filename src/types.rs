@@ -9,6 +9,7 @@ pub struct MessageArgs<'a> {
 #[derive(Clone, Debug)]
 pub struct MessageData {
     pub id: usize,
+    pub channel: String,
     pub user: String,
     pub content: String,
     pub is_self: bool,

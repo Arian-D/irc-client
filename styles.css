@@ -7,13 +7,9 @@
     line-height: 24px;
     font-weight: 400;
 
-<<<<<<< HEAD
-  color: #0f0f0f;
-  background-color: cyan;
-=======
+
     color: #0f0f0f;
     background-color: #f6f6f6;
->>>>>>> 5e3f58f (Added message bubble component and moved input to it's own component)
 
     font-synthesis: none;
     text-rendering: optimizeLegibility;
@@ -63,6 +59,7 @@ h1 {
 
 input,
 button {
+
     border-radius: 8px;
     border: 1px solid transparent;
     padding: 0.6em 1.2em;
@@ -73,6 +70,7 @@ button {
     background-color: #ffffff;
     transition: border-color 0.25s;
     box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+>>>>>>> 5e3f58f (Added message bubble component and moved input to it's own component)
 }
 
 button {

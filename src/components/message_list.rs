@@ -4,7 +4,7 @@ use crate::components::message::MessageBubble;
 use crate::types::MessageData;
 
 #[component]
-pub fn MessageList(history: ReadSignal<Vec<MessageData>>) -> impl IntoView {
+pub fn MessageList(#[prop(into)] history: Signal<Vec<MessageData>>) -> impl IntoView {
     view! {
         <div class="chat-history">
             <For

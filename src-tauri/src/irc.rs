@@ -9,7 +9,7 @@ use winnow::prelude::*;
 use winnow::token::*;
 use winnow::Result;
 
-/// A stateful struct representing the IRC client
+/// A stateful struct representing the IRC client for a single network
 #[derive(Debug)]
 pub struct Client<'a, Socket>
 where
@@ -172,12 +172,12 @@ mod tests {
 
     #[test]
     fn test_parsing_source() {
-        let mut input = "JOIN #foobar";
+        let mut input = "JOIN #foobar\r\n";
         assert_eq!(Message::parser(&mut input), Ok(Message {
             tags: None,
             source: None,
-            command: "",
-            params: None
+            command: "JOIN",
+            params: Some(vec!["#foobar"])
         }))
     }
 }

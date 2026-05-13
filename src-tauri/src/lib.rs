@@ -1,23 +1,33 @@
 use log::{debug, info};
-use std::io::Read;
 use std::net::TcpStream;
 use std::sync::Mutex;
 use std::{collections::HashSet, io::Write};
 use tauri_plugin_store::StoreExt;
 mod irc;
+use irc::{Command, Message};
 
 type Nick = String;
 
-struct Message(Nick, String);
+struct Msg(Nick, String);
 
 struct Channel {
     users: HashSet<String>,
-    messages: Vec<Message>,
+    messages: Vec<Msg>,
 }
 
 struct InternalAppState<'a> {
-    clients: irc::Client<'a, TcpStream>,
+    client: irc::Client<'a, TcpStream>,
+    read_buf: Vec<u8>,
     channels: HashSet<Channel>,
+}
+
+impl InternalAppState<'_> {
+    fn process_messages(&mut self) {
+        let messages = self.client.read(&mut self.read_buf);
+        for msg in messages {
+            debug!("{}", msg);
+        }
+    }
 }
 
 type AppState<'a> = Mutex<InternalAppState<'a>>;
@@ -26,10 +36,18 @@ type AppState<'a> = Mutex<InternalAppState<'a>>;
 #[tauri::command]
 fn send(state: tauri::State<AppState>) -> String {
     let mut state = state.lock().unwrap();
-    let socket = &state.clients.socket;
+    let socket = &state.client.socket;
     "".to_string()
 }
 
+
+/// Connect
+#[tauri::command]
+async fn connect<'a>(state: tauri::State<'_, AppState<'a>>) -> Result<(), ()> {
+    let mut state = state.lock().unwrap();
+    let mut buf = String::new();
+    Ok(())
+}
 /// Run the main program
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -43,7 +61,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(InternalAppState {
             channels: HashSet::new(),
-            clients: irc::Client {
+            read_buf: Vec::new(),
+            client: irc::Client {
                 server: temp_server,
                 nick: temp_nick,
                 real_name: None,
@@ -51,7 +70,7 @@ pub fn run() {
                 auth: irc::Auth::Plain(temp_nick, None),
             },
         })
-        .invoke_handler(tauri::generate_handler![send])
+        .invoke_handler(tauri::generate_handler![connect, send])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

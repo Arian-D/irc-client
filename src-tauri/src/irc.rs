@@ -1,7 +1,6 @@
 use serde::de::SeqAccess;
 use std::error::Error;
 use std::fmt;
-use std::fmt::write;
 use std::io::{Read, Write};
 use winnow::ascii::*;
 use winnow::combinator::*;
@@ -9,7 +8,7 @@ use winnow::prelude::*;
 use winnow::token::*;
 use winnow::Result;
 
-/// A stateful struct representing the IRC client for a single network
+/// A low-level stateful struct representing the IRC client for a single network
 #[derive(Debug)]
 pub struct Client<'a, Socket>
 where
@@ -29,18 +28,46 @@ where
     pub auth: Auth<'a>,
 }
 
+impl<'a, Socket> Client<'a, Socket>
+where Socket: Read + Write {
+    pub fn send(&mut self, cmd: Command<'a>) {
+        self.socket.write(format!("{cmd}").as_bytes());
+    }
+
+    pub fn read<'b>(&mut self, buf: &'b mut Vec<u8>) -> Vec<Message<'b>> {
+        buf.clear();
+        let mut staging = [0u8; 512];
+        loop {
+            match self.socket.read(&mut staging) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&staging[..n]),
+                Err(_) => break,
+            }
+        }
+        let input = std::str::from_utf8(buf).unwrap_or("");
+        let mut result = vec![];
+        let mut remaining = input;
+        while let Ok(msg) = Message::parser(&mut remaining) {
+            result.push(msg);
+        }
+        result
+    }
+
+
+}
+
 /// A struct encapsulating IRC internal message information
 #[derive(Debug, PartialEq)]
-struct Message<'a> {
-    tags: Option<Vec<&'a str>>,
-    source: Option<&'a str>,
-    command: &'a str,
-    params: Option<Vec<&'a str>>,
+pub struct Message<'a> {
+    pub tags: Option<Vec<&'a str>>,
+    pub source: Option<&'a str>,
+    pub command: &'a str,
+    pub params: Option<Vec<&'a str>>,
 }
 
 /// An enum of all IRC commands
 #[derive(Debug)]
-enum Command<'a> {
+pub enum Command<'a> {
     /// Nick message: Set nickname
     Nick { nickname: &'a str },
     /// USER message: Set username and real name
@@ -95,6 +122,7 @@ enum Command<'a> {
 }
 
 impl<'a> Command<'a> {
+    /// Convert command to Message struct
     fn command_to_message(&self) -> Message<'a> {
         match self {
             Command::Nick { nickname: nickname } => Message {
@@ -141,7 +169,9 @@ impl<'a> fmt::Display for Message<'a> {
 }
 
 impl<'a> Message<'a> {
-    fn parser<'i>(i: &mut &'i str) -> ModalResult<Message<'i>> {
+    // TODO: Change this to read a stream directly instead of using str
+    /// A parser for reading Messages.
+    pub fn parser<'i>(i: &mut &'i str) -> ModalResult<Message<'i>> {
         seq! {
             Message {
                 tags: opt(
@@ -156,6 +186,7 @@ impl<'a> Message<'a> {
                 _: space0,
                 source: opt(preceded(':', take_until(0.., ' '))),
                 _: space0,
+                // This might be incorrect
                 command: alt((alpha1, digit1)),
                 _: space0,
                 params: opt(separated(0.., take_till(0.., |it| matches!(it, ' ' | '\r' | '\n')), " ")),
@@ -179,18 +210,6 @@ mod tests {
             command: "JOIN",
             params: Some(vec!["#foobar"])
         }))
-    }
-}
-
-impl<'a, T: Read + Write> Client<'a, T> {
-    fn read_from_socket(&mut self) -> String {
-        let mut result: String = String::new();
-        // Based on the ¶8.2
-        let mut buffer = vec![0; 512];
-        while let Ok(_) = self.socket.read_exact(&mut buffer) {
-            result += str::from_utf8(&buffer).unwrap();
-        }
-        result
     }
 }
 

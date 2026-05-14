@@ -30,8 +30,8 @@ where
 
 impl<'a, Socket> Client<'a, Socket>
 where Socket: Read + Write {
-    pub fn send(&mut self, cmd: Command<'a>) {
-        self.socket.write(format!("{cmd}").as_bytes());
+    pub fn send(&mut self, cmd: Command) {
+        let _ = self.socket.write(format!("{cmd}").as_bytes());
     }
 
     pub fn read<'b>(&mut self, buf: &'b mut Vec<u8>) -> Vec<Message<'b>> {
@@ -41,6 +41,7 @@ where Socket: Read + Write {
             match self.socket.read(&mut staging) {
                 Ok(0) => break,
                 Ok(n) => buf.extend_from_slice(&staging[..n]),
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(_) => break,
             }
         }
@@ -67,44 +68,44 @@ pub struct Message<'a> {
 
 /// An enum of all IRC commands
 #[derive(Debug)]
-pub enum Command<'a> {
+pub enum Command {
     /// Nick message: Set nickname
-    Nick { nickname: &'a str },
+    Nick { nickname: String },
     /// USER message: Set username and real name
     User {
-        username: &'a str,
-        real_name: &'a str,
+        username: String,
+        real_name: String,
     },
     /// QUIT the server with an optional message
-    Quit { message: Option<&'a str> },
+    Quit { message: Option<String> },
     // TODO: Implement PASS
     /// JOIN 1 or more channels.
-    Join { channels: Vec<&'a str> },
+    Join { channels: Vec<String> },
     /// PART message: leave 1 or more channels
-    Part { channels: Vec<&'a str> },
+    Part { channels: Vec<String> },
     /// MODE message: Set the channel or user mode with args
-    Mode { params: Vec<&'a str> },
+    Mode { params: Vec<String> },
     /// TOPIC message: View or optionally set channel topic
     Topic {
-        channel: &'a str,
-        topic: Option<&'a str>,
+        channel: String,
+        topic: Option<String>,
     },
     /// NAMES: List NICKs, optionally providing channels
-    Names { channels: Option<Vec<&'a str>> },
+    Names { channels: Option<Vec<String>> },
     /// LISIT channel names
-    List { channels: Option<Vec<&'a str>> },
+    List { channels: Option<Vec<String>> },
     /// INVITE user to channel
-    Invite { user: &'a str, channel: &'a str },
+    Invite { user: String, channel: String },
     /// KICK: Kick user from channel with optional reason
     Kick {
-        user: &'a str,
-        channel: &'a str,
-        reason: Option<&'a str>,
+        user: String,
+        channel: String,
+        reason: Option<String>,
     },
     /// PRVMSG: Send message to one or more receivers
     PrivMsg {
-        message: &'a str,
-        receivers: Vec<&'a str>,
+        message: String,
+        receivers: Vec<String>,
     },
     // Commands for later
     // VERSION
@@ -121,22 +122,22 @@ pub enum Command<'a> {
     // AWAY
 }
 
-impl<'a> Command<'a> {
+impl Command {
     /// Convert command to Message struct
-    fn command_to_message(&self) -> Message<'a> {
+    fn command_to_message(&self) -> Message<'_> {
         match self {
-            Command::Nick { nickname: nickname } => Message {
+            Command::Nick { nickname } => Message {
                 tags: None,
                 source: None,
                 command: "NICK",
-                params: Some(vec![nickname]),
+                params: Some(vec![nickname.as_str()]),
             },
             _ => todo!("😔"),
         }
     }
 }
 
-impl<'a> fmt::Display for Command<'a> {
+impl fmt::Display for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.command_to_message())
     }

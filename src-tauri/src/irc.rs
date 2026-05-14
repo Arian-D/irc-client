@@ -1,14 +1,12 @@
-use serde::de::SeqAccess;
-use std::error::Error;
 use std::fmt;
-use std::io::{Read, Write};
+use std::io::{Error, ErrorKind, Read, Write};
+use std::time::{Duration, Instant};
 use winnow::ascii::*;
 use winnow::combinator::*;
 use winnow::prelude::*;
 use winnow::token::*;
-use winnow::Result;
 
-/// A low-level stateful struct representing the IRC client for a single network
+/// A stateful struct representing the IRC client
 #[derive(Debug)]
 pub struct Client<'a, Socket>
 where
@@ -28,35 +26,6 @@ where
     pub auth: Auth<'a>,
 }
 
-impl<'a, Socket> Client<'a, Socket>
-where Socket: Read + Write {
-    pub fn send(&mut self, cmd: Command) {
-        let _ = self.socket.write(format!("{cmd}").as_bytes());
-    }
-
-    pub fn read<'b>(&mut self, buf: &'b mut Vec<u8>) -> Vec<Message<'b>> {
-        buf.clear();
-        let mut staging = [0u8; 512];
-        loop {
-            match self.socket.read(&mut staging) {
-                Ok(0) => break,
-                Ok(n) => buf.extend_from_slice(&staging[..n]),
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(_) => break,
-            }
-        }
-        let input = std::str::from_utf8(buf).unwrap_or("");
-        let mut result = vec![];
-        let mut remaining = input;
-        while let Ok(msg) = Message::parser(&mut remaining) {
-            result.push(msg);
-        }
-        result
-    }
-
-
-}
-
 /// A struct encapsulating IRC internal message information
 #[derive(Debug, PartialEq)]
 pub struct Message<'a> {
@@ -68,44 +37,44 @@ pub struct Message<'a> {
 
 /// An enum of all IRC commands
 #[derive(Debug)]
-pub enum Command {
+enum Command<'a> {
     /// Nick message: Set nickname
-    Nick { nickname: String },
+    Nick { nickname: &'a str },
     /// USER message: Set username and real name
     User {
-        username: String,
-        real_name: String,
+        username: &'a str,
+        real_name: &'a str,
     },
     /// QUIT the server with an optional message
-    Quit { message: Option<String> },
+    Quit { message: Option<&'a str> },
     // TODO: Implement PASS
     /// JOIN 1 or more channels.
-    Join { channels: Vec<String> },
+    Join { channels: Vec<&'a str> },
     /// PART message: leave 1 or more channels
-    Part { channels: Vec<String> },
+    Part { channels: Vec<&'a str> },
     /// MODE message: Set the channel or user mode with args
-    Mode { params: Vec<String> },
+    Mode { params: Vec<&'a str> },
     /// TOPIC message: View or optionally set channel topic
     Topic {
-        channel: String,
-        topic: Option<String>,
+        channel: &'a str,
+        topic: Option<&'a str>,
     },
     /// NAMES: List NICKs, optionally providing channels
-    Names { channels: Option<Vec<String>> },
+    Names { channels: Option<Vec<&'a str>> },
     /// LISIT channel names
-    List { channels: Option<Vec<String>> },
+    List { channels: Option<Vec<&'a str>> },
     /// INVITE user to channel
-    Invite { user: String, channel: String },
+    Invite { user: &'a str, channel: &'a str },
     /// KICK: Kick user from channel with optional reason
     Kick {
-        user: String,
-        channel: String,
-        reason: Option<String>,
+        user: &'a str,
+        channel: &'a str,
+        reason: Option<&'a str>,
     },
     /// PRVMSG: Send message to one or more receivers
     PrivMsg {
-        message: String,
-        receivers: Vec<String>,
+        message: &'a str,
+        receivers: Vec<&'a str>,
     },
     // Commands for later
     // VERSION
@@ -122,22 +91,21 @@ pub enum Command {
     // AWAY
 }
 
-impl Command {
-    /// Convert command to Message struct
-    fn command_to_message(&self) -> Message<'_> {
+impl<'a> Command<'a> {
+    fn command_to_message(&self) -> Message<'a> {
         match self {
-            Command::Nick { nickname } => Message {
+            Command::Nick { nickname: nickname } => Message {
                 tags: None,
                 source: None,
                 command: "NICK",
-                params: Some(vec![nickname.as_str()]),
+                params: Some(vec![nickname]),
             },
             _ => todo!("😔"),
         }
     }
 }
 
-impl fmt::Display for Command {
+impl<'a> fmt::Display for Command<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.command_to_message())
     }
@@ -170,9 +138,7 @@ impl<'a> fmt::Display for Message<'a> {
 }
 
 impl<'a> Message<'a> {
-    // TODO: Change this to read a stream directly instead of using str
-    /// A parser for reading Messages.
-    pub fn parser<'i>(i: &mut &'i str) -> ModalResult<Message<'i>> {
+    fn parser<'i>(i: &mut &'i str) -> ModalResult<Message<'i>> {
         seq! {
             Message {
                 tags: opt(
@@ -187,7 +153,6 @@ impl<'a> Message<'a> {
                 _: space0,
                 source: opt(preceded(':', take_until(0.., ' '))),
                 _: space0,
-                // This might be incorrect
                 command: alt((alpha1, digit1)),
                 _: space0,
                 params: opt(separated(0.., take_till(0.., |it| matches!(it, ' ' | '\r' | '\n')), " ")),
@@ -205,20 +170,195 @@ mod tests {
     #[test]
     fn test_parsing_source() {
         let mut input = "JOIN #foobar\r\n";
-        assert_eq!(Message::parser(&mut input), Ok(Message {
-            tags: None,
-            source: None,
-            command: "JOIN",
-            params: Some(vec!["#foobar"])
-        }))
+        assert_eq!(
+            Message::parser(&mut input),
+            Ok(Message {
+                tags: None,
+                source: None,
+                command: "JOIN",
+                params: Some(vec!["#foobar"])
+            })
+        )
     }
+}
+
+impl<'a, T: Read + Write> Client<'a, T> {
+    pub fn read<'b>(&mut self, buf: &'b mut Vec<u8>) -> Vec<Message<'b>> {
+        buf.clear();
+        let mut staging = [0u8; 512];
+        loop {
+            match self.socket.read(&mut staging) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&staging[..n]),
+                Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => break,
+                Err(_) => break,
+            }
+        }
+
+        let input = std::str::from_utf8(buf).unwrap_or("");
+        let mut result = vec![];
+        let mut remaining = input;
+        while let Ok(msg) = Message::parser(&mut remaining) {
+            result.push(msg);
+        }
+        result
+    }
+
+    fn write_raw_line(&mut self, line: &str) -> std::io::Result<()> {
+        self.socket.write_all(line.as_bytes())?;
+        self.socket.write_all(b"\r\n")?;
+        self.socket.flush()
+    }
+
+    pub fn register_and_authenticate(&mut self) -> std::io::Result<()> {
+        self.write_raw_line(&format!("NICK {}", self.nick))?;
+
+        let username = self.nick;
+        let real_name = self.real_name.unwrap_or(self.nick);
+        self.write_raw_line(&format!("USER {username} 0 * :{real_name}"))?;
+
+        if let Auth::NickServ { account, password } = &self.auth {
+            let identify_command = if let Some(account) = account {
+                format!("PRIVMSG NickServ :IDENTIFY {account} {password}")
+            } else {
+                format!("PRIVMSG NickServ :IDENTIFY {password}")
+            };
+            self.write_raw_line(&identify_command)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn service_connection(&mut self) -> std::io::Result<()> {
+        let mut buf = Vec::new();
+        let messages = self.read(&mut buf);
+        for message in messages {
+            if message.command == "PING" {
+                if let Some(token) = message.params.and_then(|params| params.last().copied()) {
+                    self.send_pong(token)?;
+                }
+                continue;
+            }
+            if message.command == "ERROR" {
+                return Err(Error::new(
+                    ErrorKind::ConnectionAborted,
+                    "IRC server closed the connection",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn await_welcome(&mut self, timeout: Duration) -> std::io::Result<()> {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            let mut buf = Vec::new();
+            let messages = self.read(&mut buf);
+
+            for message in messages {
+                if message.command == "PING" {
+                    if let Some(token) = message.params.and_then(|params| params.last().copied()) {
+                        self.send_pong(token)?;
+                    }
+                    continue;
+                }
+
+                if message.command == "001" {
+                    return Ok(());
+                }
+
+                if message.command == "433" {
+                    return Err(Error::new(
+                        ErrorKind::AddrInUse,
+                        "Nickname already in use on this server",
+                    ));
+                }
+            }
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        Err(Error::new(
+            ErrorKind::TimedOut,
+            "Timed out waiting for IRC registration confirmation",
+        ))
+    }
+
+    pub fn join_channel(&mut self, channel: &str) -> std::io::Result<()> {
+        let channel = sanitize_irc_line_value(channel);
+        if channel.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Channel cannot be empty",
+            ));
+        }
+        self.write_raw_line(&format!("JOIN {channel}"))
+    }
+
+    pub fn leave_channel(&mut self, channel: &str) -> std::io::Result<()> {
+        let channel = sanitize_irc_line_value(channel);
+        if channel.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Channel cannot be empty",
+            ));
+        }
+        self.write_raw_line(&format!("PART {channel}"))
+    }
+
+    pub fn send_privmsg(&mut self, receiver: &str, message: &str) -> std::io::Result<()> {
+        let receiver = sanitize_irc_line_value(receiver);
+        let message = sanitize_irc_line_value(message);
+        if receiver.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Receiver cannot be empty",
+            ));
+        }
+        if message.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Message cannot be empty",
+            ));
+        }
+        self.write_raw_line(&format!("PRIVMSG {receiver} :{message}"))
+    }
+
+    pub fn send_pong(&mut self, token: &str) -> std::io::Result<()> {
+        self.write_raw_line(&format!("PONG {token}"))
+    }
+
+    fn read_from_socket(&mut self) -> String {
+        let mut result: String = String::new();
+        // Based on the ¶8.2
+        let mut buffer = vec![0; 512];
+        while let Ok(_) = self.socket.read_exact(&mut buffer) {
+            result += str::from_utf8(&buffer).unwrap();
+        }
+        result
+    }
+}
+
+fn sanitize_irc_line_value(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| *ch != '\r' && *ch != '\n')
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// Authentication method
 #[derive(Debug)]
 pub enum Auth<'a> {
-    /// NickServ with Nick and Pass (which may not exist)
-    Plain(&'a str, Option<&'a str>),
+    /// No explicit authentication.
+    None,
+    /// Authenticate to NickServ after registration.
+    NickServ {
+        account: Option<&'a str>,
+        password: &'a str,
+    },
     /// CertFP authentication. Unsure if this can be used in conjunction with the other, so it might need to be relocated.
     Cert(&'a str),
 }

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct MessageArgs<'a> {
-    pub user: &'a str,
+    pub channel: &'a str,
     pub message: &'a str,
 }
 
@@ -19,4 +19,14 @@ pub struct MessageData {
 pub struct NetworkData {
     pub name: String,
     pub channels: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionSettings {
+    pub server: String,
+    pub nick: String,
+    pub real_name: Option<String>,
+    pub nickserv_password: Option<String>,
+    pub nickserv_account: Option<String>,
 }

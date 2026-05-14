@@ -48,10 +48,54 @@ body {
 }
 
 /* --- LEFT SIDEBAR --- */
-.sidebar-left {
-    width: 260px;
-    background-color: var(--bg-sidebar);
+.left-panel {
+    width: 320px;
     border-right: 1px solid var(--border-color);
+    background-color: var(--bg-sidebar);
+    display: flex;
+    flex-direction: column;
+}
+
+.connection-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.connection-settings h3 {
+    margin: 0 0 6px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+}
+
+.connection-settings input {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-main);
+    color: var(--text-main);
+}
+
+.connection-settings button {
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: none;
+    background-color: #007aff;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.connection-settings button:hover {
+    background-color: #006ce4;
+}
+
+.sidebar-left {
+    flex: 1;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -66,6 +110,32 @@ body {
     margin: 0;
 }
 
+.join-channel-form {
+    display: flex;
+    gap: 8px;
+    padding: 10px 10px 6px;
+}
+
+.join-channel-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-main);
+    color: var(--text-main);
+}
+
+.join-channel-form button {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: none;
+    background-color: #007aff;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+}
+
 .channel-list {
     list-style: none;
     margin: 0;
@@ -73,6 +143,9 @@ body {
 }
 
 .channel-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     padding: 8px 12px;
     margin-bottom: 2px;
     border-radius: 6px;
@@ -89,6 +162,19 @@ body {
 .channel-list li.active {
     background-color: var(--active-item);
     font-weight: bold;
+}
+
+.leave-channel-btn {
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background-color: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.leave-channel-btn:hover {
+    background-color: var(--hover-item);
 }
 
 /* --- MIDDLE CHAT AREA --- */

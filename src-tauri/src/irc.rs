@@ -1,8 +1,5 @@
-use serde::de::SeqAccess;
-use std::error::Error;
 use std::fmt;
-use std::fmt::write;
-use std::io::{Read, Write};
+use std::io::{Error, ErrorKind, Read, Write};
 use winnow::ascii::*;
 use winnow::combinator::*;
 use winnow::prelude::*;
@@ -173,16 +170,84 @@ mod tests {
     #[test]
     fn test_parsing_source() {
         let mut input = "JOIN #foobar";
-        assert_eq!(Message::parser(&mut input), Ok(Message {
-            tags: None,
-            source: None,
-            command: "",
-            params: None
-        }))
+        assert_eq!(
+            Message::parser(&mut input),
+            Ok(Message {
+                tags: None,
+                source: None,
+                command: "",
+                params: None
+            })
+        )
     }
 }
 
 impl<'a, T: Read + Write> Client<'a, T> {
+    fn write_raw_line(&mut self, line: &str) -> std::io::Result<()> {
+        self.socket.write_all(line.as_bytes())?;
+        self.socket.write_all(b"\r\n")?;
+        self.socket.flush()
+    }
+
+    pub fn register_and_authenticate(&mut self) -> std::io::Result<()> {
+        self.write_raw_line(&format!("NICK {}", self.nick))?;
+
+        let username = self.nick;
+        let real_name = self.real_name.unwrap_or(self.nick);
+        self.write_raw_line(&format!("USER {username} 0 * :{real_name}"))?;
+
+        if let Auth::NickServ { account, password } = &self.auth {
+            let identify_command = if let Some(account) = account {
+                format!("PRIVMSG NickServ :IDENTIFY {account} {password}")
+            } else {
+                format!("PRIVMSG NickServ :IDENTIFY {password}")
+            };
+            self.write_raw_line(&identify_command)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn join_channel(&mut self, channel: &str) -> std::io::Result<()> {
+        let channel = sanitize_irc_line_value(channel);
+        if channel.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Channel cannot be empty",
+            ));
+        }
+        self.write_raw_line(&format!("JOIN {channel}"))
+    }
+
+    pub fn leave_channel(&mut self, channel: &str) -> std::io::Result<()> {
+        let channel = sanitize_irc_line_value(channel);
+        if channel.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Channel cannot be empty",
+            ));
+        }
+        self.write_raw_line(&format!("PART {channel}"))
+    }
+
+    pub fn send_privmsg(&mut self, receiver: &str, message: &str) -> std::io::Result<()> {
+        let receiver = sanitize_irc_line_value(receiver);
+        let message = sanitize_irc_line_value(message);
+        if receiver.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Receiver cannot be empty",
+            ));
+        }
+        if message.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Message cannot be empty",
+            ));
+        }
+        self.write_raw_line(&format!("PRIVMSG {receiver} :{message}"))
+    }
+
     fn read_from_socket(&mut self) -> String {
         let mut result: String = String::new();
         // Based on the ¶8.2
@@ -194,11 +259,25 @@ impl<'a, T: Read + Write> Client<'a, T> {
     }
 }
 
+fn sanitize_irc_line_value(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| *ch != '\r' && *ch != '\n')
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 /// Authentication method
 #[derive(Debug)]
 pub enum Auth<'a> {
-    /// NickServ with Nick and Pass (which may not exist)
-    Plain(&'a str, Option<&'a str>),
+    /// No explicit authentication.
+    None,
+    /// Authenticate to NickServ after registration.
+    NickServ {
+        account: Option<&'a str>,
+        password: &'a str,
+    },
     /// CertFP authentication. Unsure if this can be used in conjunction with the other, so it might need to be relocated.
     Cert(&'a str),
 }

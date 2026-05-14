@@ -9,7 +9,14 @@ which podman
 
 podman build -t $image_name -f dev.Dockerfile .
 
-(podman run
+[run build shell]
+| input list --fuzzy
+| match $in {
+  run => "cargo tauri dev",
+  build => "cargo tauri build",
+  shell => "bash"
+}
+| (podman run
   --rm
   -it
   -e XDG_RUNTIME_DIR=/tmp
@@ -17,4 +24,4 @@ podman build -t $image_name -f dev.Dockerfile .
   -v ($env.XDG_RUNTIME_DIR | path join $env.WAYLAND_DISPLAY):/tmp/($env.WAYLAND_DISPLAY)
   -v (pwd):/app
   irc-client
-  cargo tauri dev)
+  bash -c $in)

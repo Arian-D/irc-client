@@ -1,6 +1,7 @@
 use log::error;
 use std::net::TcpStream;
 use std::sync::Mutex;
+use std::time::Duration;
 use std::{collections::HashSet, env};
 mod irc;
 
@@ -20,103 +21,131 @@ struct AppState {
     joined_channels: Mutex<HashSet<String>>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SendArgs {
-    channel: String,
-    message: String,
+struct IrcEvent {
+    kind: String,
+    channel: Option<String>,
+    user: Option<String>,
+    text: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ChannelArgs {
-    channel: String,
+fn normalize_channel_name(input: &str) -> Option<String> {
+    let channel = input.trim().trim_start_matches(':').trim();
+    if channel.is_empty() {
+        return None;
+    }
+    if channel.starts_with('#') {
+        Some(channel.to_string())
+    } else {
+        Some(format!("#{channel}"))
+    }
+}
+
+fn source_nick(source: Option<&str>) -> Option<String> {
+    source.map(|raw| raw.split('!').next().unwrap_or(raw).to_string())
+}
+
+fn combine_params(params: &[&str], start_index: usize) -> String {
+    if params.len() <= start_index {
+        return String::new();
+    }
+    params[start_index..]
+        .join(" ")
+        .trim_start_matches(':')
+        .to_string()
 }
 
 /// Send the message
 #[tauri::command]
-fn send(args: SendArgs, state: tauri::State<'_, AppState>) -> String {
-    let channel = args.channel.trim();
-    let message = args.message.trim();
-    if channel.is_empty() {
-        return "Channel cannot be empty".to_string();
-    }
+fn send(channel: String, message: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let Some(channel) = normalize_channel_name(&channel) else {
+        return Err("Channel cannot be empty".to_string());
+    };
+    let message = message.trim();
     if message.is_empty() {
-        return "Message cannot be empty".to_string();
+        return Err("Message cannot be empty".to_string());
     }
 
-    let mut client = match state.client.lock() {
-        Ok(client) => client,
-        Err(error) => return format!("Failed to access IRC client: {error}"),
-    };
-    let joined_channels = match state.joined_channels.lock() {
-        Ok(channels) => channels,
-        Err(error) => return format!("Failed to access joined channels: {error}"),
-    };
+    let mut client = state
+        .client
+        .lock()
+        .map_err(|error| format!("Failed to access IRC client: {error}"))?;
+    client
+        .service_connection()
+        .map_err(|error| format!("Connection error before send: {error}"))?;
+    let joined_channels = state
+        .joined_channels
+        .lock()
+        .map_err(|error| format!("Failed to access joined channels: {error}"))?;
 
-    if !joined_channels.contains(channel) {
-        return format!("Not joined to {channel}. Join it first.");
+    if !joined_channels.contains(channel.as_str()) {
+        return Err(format!("Not joined to {channel}. Join it first."));
     }
 
-    if let Err(error) = client.send_privmsg(channel, message) {
-        return format!("Failed to send message: {error}");
-    }
+    client
+        .send_privmsg(channel.as_str(), message)
+        .map_err(|error| format!("Failed to send message: {error}"))?;
 
-    "Message sent".to_string()
+    Ok("Message sent".to_string())
 }
 
 #[tauri::command]
-fn join_channel(args: ChannelArgs, state: tauri::State<'_, AppState>) -> String {
-    let channel = args.channel.trim();
-    if channel.is_empty() {
-        return "Channel cannot be empty".to_string();
-    }
-
-    let mut client = match state.client.lock() {
-        Ok(client) => client,
-        Err(error) => return format!("Failed to access IRC client: {error}"),
-    };
-    let mut joined_channels = match state.joined_channels.lock() {
-        Ok(channels) => channels,
-        Err(error) => return format!("Failed to access joined channels: {error}"),
+fn join_channel(channel: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let Some(channel) = normalize_channel_name(&channel) else {
+        return Err("Channel cannot be empty".to_string());
     };
 
-    if joined_channels.contains(channel) {
-        return format!("Already joined {channel}");
+    let mut client = state
+        .client
+        .lock()
+        .map_err(|error| format!("Failed to access IRC client: {error}"))?;
+    client
+        .service_connection()
+        .map_err(|error| format!("Connection error before join: {error}"))?;
+    let mut joined_channels = state
+        .joined_channels
+        .lock()
+        .map_err(|error| format!("Failed to access joined channels: {error}"))?;
+
+    if joined_channels.contains(channel.as_str()) {
+        return Ok(format!("Already joined {channel}"));
     }
 
-    if let Err(error) = client.join_channel(channel) {
-        return format!("Failed to join {channel}: {error}");
-    }
-    joined_channels.insert(channel.to_string());
-    format!("Joined {channel}")
+    client
+        .join_channel(channel.as_str())
+        .map_err(|error| format!("Failed to join {channel}: {error}"))?;
+    joined_channels.insert(channel.clone());
+    Ok(format!("Joined {channel}"))
 }
 
 #[tauri::command]
-fn leave_channel(args: ChannelArgs, state: tauri::State<'_, AppState>) -> String {
-    let channel = args.channel.trim();
-    if channel.is_empty() {
-        return "Channel cannot be empty".to_string();
-    }
-
-    let mut client = match state.client.lock() {
-        Ok(client) => client,
-        Err(error) => return format!("Failed to access IRC client: {error}"),
-    };
-    let mut joined_channels = match state.joined_channels.lock() {
-        Ok(channels) => channels,
-        Err(error) => return format!("Failed to access joined channels: {error}"),
+fn leave_channel(channel: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let Some(channel) = normalize_channel_name(&channel) else {
+        return Err("Channel cannot be empty".to_string());
     };
 
-    if !joined_channels.contains(channel) {
-        return format!("Not currently joined to {channel}");
+    let mut client = state
+        .client
+        .lock()
+        .map_err(|error| format!("Failed to access IRC client: {error}"))?;
+    client
+        .service_connection()
+        .map_err(|error| format!("Connection error before leave: {error}"))?;
+    let mut joined_channels = state
+        .joined_channels
+        .lock()
+        .map_err(|error| format!("Failed to access joined channels: {error}"))?;
+
+    if !joined_channels.contains(channel.as_str()) {
+        return Err(format!("Not currently joined to {channel}"));
     }
 
-    if let Err(error) = client.leave_channel(channel) {
-        return format!("Failed to leave {channel}: {error}");
-    }
-    joined_channels.remove(channel);
-    format!("Left {channel}")
+    client
+        .leave_channel(channel.as_str())
+        .map_err(|error| format!("Failed to leave {channel}: {error}"))?;
+    joined_channels.remove(channel.as_str());
+    Ok(format!("Left {channel}"))
 }
 
 #[tauri::command]
@@ -130,6 +159,96 @@ fn get_joined_channels(state: tauri::State<'_, AppState>) -> Result<Vec<String>,
         .collect::<Vec<_>>();
     channels.sort();
     Ok(channels)
+}
+
+#[tauri::command]
+fn poll_events(state: tauri::State<'_, AppState>) -> Result<Vec<IrcEvent>, String> {
+    let mut client = state
+        .client
+        .lock()
+        .map_err(|error| format!("Failed to access IRC client: {error}"))?;
+    let mut joined_channels = state
+        .joined_channels
+        .lock()
+        .map_err(|error| format!("Failed to access joined channels: {error}"))?;
+
+    let mut buf = Vec::new();
+    let messages = client.read(&mut buf);
+    let mut events = Vec::new();
+
+    for message in messages {
+        if message.command == "PING" {
+            if let Some(token) = message.params.as_ref().and_then(|params| params.last().copied()) {
+                client
+                    .send_pong(token)
+                    .map_err(|error| format!("Failed to send PONG: {error}"))?;
+            }
+            continue;
+        }
+
+        match message.command {
+            "PRIVMSG" => {
+                if let Some(params) = message.params.as_ref() {
+                    if let Some(channel) = params.first() {
+                        events.push(IrcEvent {
+                            kind: "message".to_string(),
+                            channel: Some((*channel).to_string()),
+                            user: source_nick(message.source),
+                            text: combine_params(params, 1),
+                        });
+                    }
+                }
+            }
+            "JOIN" => {
+                if let Some(params) = message.params.as_ref() {
+                    if let Some(channel) = params.first() {
+                        let normalized = normalize_channel_name(channel).unwrap_or_else(|| channel.to_string());
+                        if source_nick(message.source).as_deref() == Some(client.nick) {
+                            joined_channels.insert(normalized.clone());
+                        }
+                        events.push(IrcEvent {
+                            kind: "status".to_string(),
+                            channel: Some(normalized),
+                            user: source_nick(message.source),
+                            text: "Joined".to_string(),
+                        });
+                    }
+                }
+            }
+            "PART" => {
+                if let Some(params) = message.params.as_ref() {
+                    if let Some(channel) = params.first() {
+                        let normalized = normalize_channel_name(channel).unwrap_or_else(|| channel.to_string());
+                        if source_nick(message.source).as_deref() == Some(client.nick) {
+                            joined_channels.remove(normalized.as_str());
+                        }
+                        events.push(IrcEvent {
+                            kind: "status".to_string(),
+                            channel: Some(normalized),
+                            user: source_nick(message.source),
+                            text: "Left".to_string(),
+                        });
+                    }
+                }
+            }
+            "ERROR" | "NOTICE" | "401" | "403" | "404" | "433" => {
+                let text = message
+                    .params
+                    .as_ref()
+                    .map(|params| combine_params(params, 0))
+                    .unwrap_or_else(|| "IRC server message".to_string());
+                events.push(IrcEvent {
+                    kind: "status".to_string(),
+                    channel: None,
+                    user: source_nick(message.source),
+                    text,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(events)
 }
 
 #[tauri::command]
@@ -214,6 +333,9 @@ fn connect_client_from_settings(
 
     let tcpstream = TcpStream::connect(&settings.server)
         .map_err(|error| format!("Failed to connect to {}: {error}", settings.server))?;
+    tcpstream
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .map_err(|error| format!("Failed to configure IRC socket read timeout: {error}"))?;
 
     let auth = if let Some(password) = settings.nickserv_password.clone() {
         irc::Auth::NickServ {
@@ -235,6 +357,9 @@ fn connect_client_from_settings(
     client
         .register_and_authenticate()
         .map_err(|error| format!("Failed during IRC registration/authentication: {error}"))?;
+    client
+        .await_welcome(Duration::from_secs(8))
+        .map_err(|error| format!("Failed waiting for IRC server welcome: {error}"))?;
 
     Ok(client)
 }
@@ -267,6 +392,7 @@ pub fn run() {
             send,
             join_channel,
             leave_channel,
+            poll_events,
             get_joined_channels,
             get_connection_settings,
             update_connection_settings

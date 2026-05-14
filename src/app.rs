@@ -9,6 +9,15 @@ use crate::components::message_list::MessageList;
 use crate::components::sidebar::SidebarLeft;
 use crate::types::{ConnectionSettings, MessageArgs, MessageData};
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IrcEvent {
+    kind: String,
+    channel: Option<String>,
+    user: Option<String>,
+    text: String,
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateConnectionArgs<'a> {
@@ -21,10 +30,44 @@ struct ChannelArgs<'a> {
     channel: &'a str,
 }
 
+fn normalize_channel_name(input: &str) -> Option<String> {
+    let channel = input.trim().trim_start_matches(':').trim();
+    if channel.is_empty() {
+        return None;
+    }
+    if channel.starts_with('#') {
+        Some(channel.to_string())
+    } else {
+        Some(format!("#{channel}"))
+    }
+}
+
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"])]
-    async fn invoke(cmd: &str, args: JsValue) -> JsValue;
+    #[wasm_bindgen(
+        catch,
+        js_namespace = ["window", "__TAURI__", "core"],
+        js_name = invoke
+    )]
+    async fn tauri_invoke(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
+}
+
+#[wasm_bindgen(inline_js = "export function sleep_ms(ms){ return new Promise((resolve) => setTimeout(resolve, ms)); }")]
+extern "C" {
+    async fn sleep_ms(ms: u32);
+}
+
+fn format_invoke_error(error: JsValue) -> String {
+    error.as_string().unwrap_or_else(|| {
+        js_sys::Reflect::get(&error, &JsValue::from_str("message"))
+            .ok()
+            .and_then(|msg| msg.as_string())
+            .unwrap_or_else(|| "Unknown Tauri invoke error".to_string())
+    })
+}
+
+async fn invoke_tauri(cmd: &str, args: JsValue) -> Result<JsValue, String> {
+    tauri_invoke(cmd, args).await.map_err(format_invoke_error)
 }
 
 #[component]
@@ -53,7 +96,13 @@ pub fn App() -> impl IntoView {
 
     let refresh_joined_channels = Callback::new(move |_| {
         spawn_local(async move {
-            let response = invoke("get_joined_channels", Object::new().into()).await;
+            let response = match invoke_tauri("get_joined_channels", Object::new().into()).await {
+                Ok(response) => response,
+                Err(error) => {
+                    set_server_status.set(format!("Failed to load joined channels: {error}"));
+                    return;
+                }
+            };
             match serde_wasm_bindgen::from_value::<Vec<String>>(response) {
                 Ok(channels) => {
                     let active = current_channel.get_untracked();
@@ -74,7 +123,15 @@ pub fn App() -> impl IntoView {
 
     Effect::new(move |_| {
         spawn_local(async move {
-            let response = invoke("get_connection_settings", Object::new().into()).await;
+            let response = match invoke_tauri("get_connection_settings", Object::new().into()).await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    set_server_status
+                        .set(format!("Failed to load connection settings: {error}"));
+                    return;
+                }
+            };
             match serde_wasm_bindgen::from_value::<ConnectionSettings>(response) {
                 Ok(settings) => {
                     set_server.set(settings.server);
@@ -92,6 +149,56 @@ pub fn App() -> impl IntoView {
         refresh_joined_channels.run(());
     });
 
+    Effect::new(move |_| {
+        spawn_local(async move {
+            loop {
+                let response = match invoke_tauri("poll_events", Object::new().into()).await {
+                    Ok(response) => response,
+                    Err(error) => {
+                        set_server_status.set(format!("Failed to poll IRC events: {error}"));
+                        sleep_ms(750).await;
+                        continue;
+                    }
+                };
+
+                match serde_wasm_bindgen::from_value::<Vec<IrcEvent>>(response) {
+                    Ok(events) => {
+                        for event in events {
+                            if event.kind == "message" {
+                                if let Some(channel) = event.channel {
+                                    let current_id = next_id.get_untracked();
+                                    set_next_id.update(|id| *id += 1);
+                                    let sender = event.user.unwrap_or_else(|| "Unknown".to_string());
+                                    let self_nick = nick.get_untracked();
+                                    set_history.update(|h| {
+                                        h.push(MessageData {
+                                            id: current_id,
+                                            channel,
+                                            user: sender.clone(),
+                                            content: event.text.clone(),
+                                            is_self: sender == self_nick,
+                                        });
+                                    });
+                                }
+                                continue;
+                            }
+
+                            if event.kind == "status" {
+                                set_server_status.set(event.text);
+                                refresh_joined_channels.run(());
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        set_server_status.set(format!("Failed to decode IRC events: {error}"));
+                    }
+                }
+
+                sleep_ms(400).await;
+            }
+        });
+    });
+
     let connect_with_settings = Callback::new(move |_| {
         let settings = ConnectionSettings {
             server: server.get_untracked(),
@@ -107,63 +214,83 @@ pub fn App() -> impl IntoView {
             })
             .unwrap();
 
-            let response = invoke("update_connection_settings", args).await;
-            if let Some(message) = response.as_string() {
-                set_server_status.set(message);
-                set_joined_channels.set(Vec::new());
-                set_current_channel.set(String::new());
-                return;
-            }
-
+            let response = match invoke_tauri("update_connection_settings", args).await {
+                Ok(response) => response,
+                Err(error) => {
+                    set_server_status.set(format!("Failed to apply connection settings: {error}"));
+                    return;
+                }
+            };
             match serde_wasm_bindgen::from_value::<String>(response) {
-                Ok(message) => set_server_status.set(message),
+                Ok(message) => {
+                    set_server_status.set(message);
+                    set_joined_channels.set(Vec::new());
+                    set_current_channel.set(String::new());
+                    refresh_joined_channels.run(());
+                }
                 Err(error) => {
                     set_server_status.set(format!("Failed to apply connection settings: {error}"))
                 }
             }
-            refresh_joined_channels.run(());
         });
     });
 
     let join_selected_channel = Callback::new(move |channel: String| {
-        let channel = channel.trim().to_string();
-        if channel.is_empty() {
+        let Some(channel) = normalize_channel_name(&channel) else {
             set_server_status.set("Channel cannot be empty".to_string());
             return;
-        }
+        };
 
         spawn_local(async move {
             let args = serde_wasm_bindgen::to_value(&ChannelArgs { channel: &channel }).unwrap();
-            let response = invoke("join_channel", args)
-                .await
-                .as_string()
-                .unwrap_or_else(|| "Failed to join channel".to_string());
-            let success = response.starts_with("Joined ") || response.starts_with("Already joined ");
-            set_server_status.set(response);
-            if success {
-                set_current_channel.set(channel);
-                refresh_joined_channels.run(());
+            let response = match invoke_tauri("join_channel", args).await {
+                Ok(response) => response,
+                Err(error) => {
+                    set_server_status.set(format!("Failed to join channel: {error}"));
+                    return;
+                }
+            };
+            match serde_wasm_bindgen::from_value::<String>(response) {
+                Ok(message) => {
+                    set_server_status.set(message.clone());
+                    if message.starts_with("Joined ") || message.starts_with("Already joined ") {
+                        set_current_channel.set(channel);
+                        refresh_joined_channels.run(());
+                    }
+                }
+                Err(error) => {
+                    set_server_status.set(format!("Failed to join channel: {error}"));
+                }
             }
         });
     });
 
     let leave_selected_channel = Callback::new(move |channel: String| {
-        let channel = channel.trim().to_string();
-        if channel.is_empty() {
+        let Some(channel) = normalize_channel_name(&channel) else {
             set_server_status.set("Channel cannot be empty".to_string());
             return;
-        }
+        };
 
         spawn_local(async move {
             let args = serde_wasm_bindgen::to_value(&ChannelArgs { channel: &channel }).unwrap();
-            let response = invoke("leave_channel", args)
-                .await
-                .as_string()
-                .unwrap_or_else(|| "Failed to leave channel".to_string());
-            let success = response.starts_with("Left ");
-            set_server_status.set(response);
-            if success {
-                refresh_joined_channels.run(());
+            let response = match invoke_tauri("leave_channel", args).await {
+                Ok(response) => response,
+                Err(error) => {
+                    set_server_status.set(format!("Failed to leave channel: {error}"));
+                    return;
+                }
+            };
+            match serde_wasm_bindgen::from_value::<String>(response) {
+                Ok(message) => {
+                    let success = message.starts_with("Left ");
+                    set_server_status.set(message);
+                    if success {
+                        refresh_joined_channels.run(());
+                    }
+                }
+                Err(error) => {
+                    set_server_status.set(format!("Failed to leave channel: {error}"));
+                }
             }
         });
     });
@@ -196,11 +323,22 @@ pub fn App() -> impl IntoView {
             })
             .unwrap();
 
-            // call backend
-            let response = invoke("send", args).await.as_string().unwrap();
-            let success = response == "Message sent";
-            set_server_status.set(response);
-            if !success {
+            let response = match invoke_tauri("send", args).await {
+                Ok(response) => response,
+                Err(error) => {
+                    set_server_status.set(format!("Failed to send message: {error}"));
+                    return;
+                }
+            };
+            let response = match serde_wasm_bindgen::from_value::<String>(response) {
+                Ok(response) => response,
+                Err(error) => {
+                    set_server_status.set(format!("Failed to send message: {error}"));
+                    return;
+                }
+            };
+            set_server_status.set(response.clone());
+            if response != "Message sent" {
                 return;
             }
 

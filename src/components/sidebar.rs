@@ -18,7 +18,6 @@ pub fn SidebarLeft(
             return;
         }
         on_join.run(channel);
-        set_channel_draft.set(String::new());
     };
 
     view! {

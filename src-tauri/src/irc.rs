@@ -1,10 +1,10 @@
 use std::fmt;
 use std::io::{Error, ErrorKind, Read, Write};
+use std::time::{Duration, Instant};
 use winnow::ascii::*;
 use winnow::combinator::*;
 use winnow::prelude::*;
 use winnow::token::*;
-use winnow::Result;
 
 /// A stateful struct representing the IRC client
 #[derive(Debug)]
@@ -28,11 +28,11 @@ where
 
 /// A struct encapsulating IRC internal message information
 #[derive(Debug, PartialEq)]
-struct Message<'a> {
-    tags: Option<Vec<&'a str>>,
-    source: Option<&'a str>,
-    command: &'a str,
-    params: Option<Vec<&'a str>>,
+pub struct Message<'a> {
+    pub tags: Option<Vec<&'a str>>,
+    pub source: Option<&'a str>,
+    pub command: &'a str,
+    pub params: Option<Vec<&'a str>>,
 }
 
 /// An enum of all IRC commands
@@ -183,6 +183,28 @@ mod tests {
 }
 
 impl<'a, T: Read + Write> Client<'a, T> {
+    pub fn read<'b>(&mut self, buf: &'b mut Vec<u8>) -> Vec<Message<'b>> {
+        buf.clear();
+        let mut staging = [0u8; 512];
+        loop {
+            match self.socket.read(&mut staging) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&staging[..n]),
+                Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => break,
+                Err(_) => break,
+            }
+        }
+
+        let input = std::str::from_utf8(buf).unwrap_or("");
+        let mut result = vec![];
+        let mut remaining = input;
+        while let Ok(msg) = Message::parser(&mut remaining) {
+            result.push(msg);
+        }
+        result
+    }
+
     fn write_raw_line(&mut self, line: &str) -> std::io::Result<()> {
         self.socket.write_all(line.as_bytes())?;
         self.socket.write_all(b"\r\n")?;
@@ -206,6 +228,61 @@ impl<'a, T: Read + Write> Client<'a, T> {
         }
 
         Ok(())
+    }
+
+    pub fn service_connection(&mut self) -> std::io::Result<()> {
+        let mut buf = Vec::new();
+        let messages = self.read(&mut buf);
+        for message in messages {
+            if message.command == "PING" {
+                if let Some(token) = message.params.and_then(|params| params.last().copied()) {
+                    self.send_pong(token)?;
+                }
+                continue;
+            }
+            if message.command == "ERROR" {
+                return Err(Error::new(
+                    ErrorKind::ConnectionAborted,
+                    "IRC server closed the connection",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn await_welcome(&mut self, timeout: Duration) -> std::io::Result<()> {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            let mut buf = Vec::new();
+            let messages = self.read(&mut buf);
+
+            for message in messages {
+                if message.command == "PING" {
+                    if let Some(token) = message.params.and_then(|params| params.last().copied()) {
+                        self.send_pong(token)?;
+                    }
+                    continue;
+                }
+
+                if message.command == "001" {
+                    return Ok(());
+                }
+
+                if message.command == "433" {
+                    return Err(Error::new(
+                        ErrorKind::AddrInUse,
+                        "Nickname already in use on this server",
+                    ));
+                }
+            }
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        Err(Error::new(
+            ErrorKind::TimedOut,
+            "Timed out waiting for IRC registration confirmation",
+        ))
     }
 
     pub fn join_channel(&mut self, channel: &str) -> std::io::Result<()> {
@@ -246,6 +323,10 @@ impl<'a, T: Read + Write> Client<'a, T> {
             ));
         }
         self.write_raw_line(&format!("PRIVMSG {receiver} :{message}"))
+    }
+
+    pub fn send_pong(&mut self, token: &str) -> std::io::Result<()> {
+        self.write_raw_line(&format!("PONG {token}"))
     }
 
     fn read_from_socket(&mut self) -> String {

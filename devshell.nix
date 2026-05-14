@@ -56,6 +56,7 @@ pkgs.mkShell {
     rust-analyzer
     toolchain
     trunk
+    cargo-tauri
 
     #amp-sandboxed.config.script
   ];

@@ -24,6 +24,8 @@ where
     pub socket: Socket,
     /// Auth
     pub auth: Auth<'a>,
+    /// Bytes read from the socket that did not yet form a complete IRC line.
+    pub(crate) read_buffer: Vec<u8>,
 }
 
 /// A struct encapsulating IRC internal message information
@@ -166,6 +168,62 @@ impl<'a> Message<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::io;
+
+    enum ReadStep {
+        Data(&'static [u8]),
+        WouldBlock,
+    }
+
+    struct FragmentedSocket {
+        reads: VecDeque<ReadStep>,
+        writes: Vec<u8>,
+    }
+
+    impl FragmentedSocket {
+        fn new(reads: impl IntoIterator<Item = ReadStep>) -> Self {
+            Self {
+                reads: reads.into_iter().collect(),
+                writes: Vec::new(),
+            }
+        }
+    }
+
+    impl Read for FragmentedSocket {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            match self.reads.pop_front().unwrap_or(ReadStep::WouldBlock) {
+                ReadStep::Data(data) => {
+                    let n = data.len().min(buf.len());
+                    buf[..n].copy_from_slice(&data[..n]);
+                    Ok(n)
+                }
+                ReadStep::WouldBlock => Err(io::Error::from(ErrorKind::WouldBlock)),
+            }
+        }
+    }
+
+    impl Write for FragmentedSocket {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.writes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn test_client(reads: impl IntoIterator<Item = ReadStep>) -> Client<'static, FragmentedSocket> {
+        Client {
+            server: "irc.example.test:6667",
+            nick: "tester",
+            real_name: None,
+            socket: FragmentedSocket::new(reads),
+            auth: Auth::None,
+            read_buffer: Vec::new(),
+        }
+    }
 
     #[test]
     fn test_parsing_source() {
@@ -180,6 +238,47 @@ mod tests {
             })
         )
     }
+
+    #[test]
+    fn read_preserves_fragmented_irc_lines_between_polls() {
+        let mut client = test_client([
+            ReadStep::Data(b"PING :one\r\nPRIVMSG #room"),
+            ReadStep::WouldBlock,
+            ReadStep::Data(b" :hello\r\n"),
+            ReadStep::WouldBlock,
+        ]);
+        let mut buf = Vec::new();
+
+        let first_poll = client.read(&mut buf);
+        assert_eq!(first_poll.len(), 1);
+        assert_eq!(first_poll[0].command, "PING");
+        assert_eq!(client.read_buffer, b"PRIVMSG #room".to_vec());
+
+        let second_poll = client.read(&mut buf);
+        assert_eq!(second_poll.len(), 1);
+        assert_eq!(second_poll[0].command, "PRIVMSG");
+        assert_eq!(second_poll[0].params, Some(vec!["#room", ":hello"]));
+        assert!(client.read_buffer.is_empty());
+    }
+
+    #[test]
+    fn read_waits_until_fragmented_line_is_complete() {
+        let mut client = test_client([
+            ReadStep::Data(b"PING :server"),
+            ReadStep::WouldBlock,
+            ReadStep::Data(b"\r\n"),
+            ReadStep::WouldBlock,
+        ]);
+        let mut buf = Vec::new();
+
+        assert!(client.read(&mut buf).is_empty());
+        assert_eq!(client.read_buffer, b"PING :server".to_vec());
+
+        let messages = client.read(&mut buf);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].command, "PING");
+        assert!(client.read_buffer.is_empty());
+    }
 }
 
 impl<'a, T: Read + Write> Client<'a, T> {
@@ -189,12 +288,24 @@ impl<'a, T: Read + Write> Client<'a, T> {
         loop {
             match self.socket.read(&mut staging) {
                 Ok(0) => break,
-                Ok(n) => buf.extend_from_slice(&staging[..n]),
+                Ok(n) => self.read_buffer.extend_from_slice(&staging[..n]),
                 Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
-                Err(ref e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => break,
+                Err(ref e) if read_would_block(e.kind()) => break,
                 Err(_) => break,
             }
         }
+
+        let complete_len = self
+            .read_buffer
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        if complete_len == 0 {
+            return Vec::new();
+        }
+
+        buf.extend(self.read_buffer.drain(..complete_len));
 
         let input = std::str::from_utf8(buf).unwrap_or("");
         let mut result = vec![];
@@ -338,6 +449,10 @@ impl<'a, T: Read + Write> Client<'a, T> {
         }
         result
     }
+}
+
+fn read_would_block(kind: ErrorKind) -> bool {
+    matches!(kind, ErrorKind::WouldBlock | ErrorKind::TimedOut)
 }
 
 fn sanitize_irc_line_value(value: &str) -> String {

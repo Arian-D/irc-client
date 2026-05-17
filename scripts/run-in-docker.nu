@@ -7,7 +7,7 @@ which podman
   alias podman = docker
 }
 
-podman build -t $image_name -f dev.Dockerfile .
+podman build -t $image_name -q -f dev.Dockerfile .
 
 [run build shell]
 | input list --fuzzy
@@ -21,6 +21,7 @@ podman build -t $image_name -f dev.Dockerfile .
   -it
   -e XDG_RUNTIME_DIR=/tmp
   -e WAYLAND_DISPLAY
+  -e IRC_NICK
   -v ($env.XDG_RUNTIME_DIR | path join $env.WAYLAND_DISPLAY):/tmp/($env.WAYLAND_DISPLAY)
   -v (pwd):/app
   irc-client

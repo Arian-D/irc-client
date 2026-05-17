@@ -352,6 +352,7 @@ fn connect_client_from_settings(
         real_name: settings.real_name.clone().map(leak_string),
         socket: tcpstream,
         auth,
+        read_buffer: Vec::new(),
     };
 
     client

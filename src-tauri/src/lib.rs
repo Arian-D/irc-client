@@ -7,17 +7,17 @@ mod irc;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ConnectionSettings {
-    server: String,
-    nick: String,
-    real_name: Option<String>,
-    nickserv_password: Option<String>,
-    nickserv_account: Option<String>,
+struct ConnectionSettings<'a> {
+    server: &'a str,
+    nick: &'a str,
+    real_name: Option<&'a str>,
+    nickserv_password: Option<&'a str>,
+    nickserv_account: Option<&'a str>,
 }
 
-struct AppState {
-    client: Mutex<irc::Client<'static, TcpStream>>,
-    settings: Mutex<ConnectionSettings>,
+struct AppState<'a> {
+    client: Mutex<irc::Client<'a, TcpStream>>,
+    settings: Mutex<ConnectionSettings<'a>>,
     joined_channels: Mutex<HashSet<String>>,
 }
 
@@ -252,9 +252,9 @@ fn poll_events(state: tauri::State<'_, AppState>) -> Result<Vec<IrcEvent>, Strin
 }
 
 #[tauri::command]
-fn get_connection_settings(
+fn get_connection_settings<'a>(
     state: tauri::State<'_, AppState>,
-) -> Result<ConnectionSettings, String> {
+) -> Result<ConnectionSettings<'a>, String> {
     state
         .settings
         .lock()
@@ -262,43 +262,43 @@ fn get_connection_settings(
         .map_err(|error| format!("Failed to read settings: {error}"))
 }
 
-#[tauri::command]
-fn update_connection_settings(
-    settings: ConnectionSettings,
-    state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
-    let normalized = normalize_settings(settings);
-    let client = connect_client_from_settings(&normalized)?;
+// #[tauri::command]
+// fn update_connection_settings<'a>(
+//     settings: ConnectionSettings<'a>,
+//     state: tauri::State<'_, AppState>,
+// ) -> Result<String, String> {
+//     let normalized = normalize_settings(settings);
+//     let client = connect_client_from_settings(normalized.clone())?;
 
-    {
-        let mut client_guard = state
-            .client
-            .lock()
-            .map_err(|error| format!("Failed to update IRC client: {error}"))?;
-        *client_guard = client;
-    }
+//     {
+//         let mut client_guard = state
+//             .client
+//             .lock()
+//             .map_err(|error| format!("Failed to update IRC client: {error}"))?;
+//         *client_guard = client;
+//     }
 
-    {
-        let mut settings_guard = state
-            .settings
-            .lock()
-            .map_err(|error| format!("Failed to persist settings in app state: {error}"))?;
-        *settings_guard = normalized;
-    }
-    {
-        let mut joined_channels = state
-            .joined_channels
-            .lock()
-            .map_err(|error| format!("Failed to reset joined channel list: {error}"))?;
-        joined_channels.clear();
-    }
+//     {
+//         let mut settings_guard = state
+//             .settings
+//             .lock()
+//             .map_err(|error| format!("Failed to persist settings in app state: {error}"))?;
+//         *settings_guard = normalized;
+//     }
+//     {
+//         let mut joined_channels = state
+//             .joined_channels
+//             .lock()
+//             .map_err(|error| format!("Failed to reset joined channel list: {error}"))?;
+//         joined_channels.clear();
+//     }
 
-    Ok("Connected with updated settings".to_string())
-}
+//     Ok("Connected with updated settings".to_string())
+// }
 
-fn normalize_optional_field(value: Option<String>) -> Option<String> {
+fn normalize_optional_field<'a>(value: Option<&'a str>) -> Option<&'a str> {
     value.and_then(|v| {
-        let trimmed = v.trim().to_string();
+        let trimmed = v.trim();
         if trimmed.is_empty() {
             None
         } else {
@@ -307,23 +307,19 @@ fn normalize_optional_field(value: Option<String>) -> Option<String> {
     })
 }
 
-fn normalize_settings(settings: ConnectionSettings) -> ConnectionSettings {
+fn normalize_settings<'a>(settings: ConnectionSettings<'a>) -> ConnectionSettings<'a> {
     ConnectionSettings {
-        server: settings.server.trim().to_string(),
-        nick: settings.nick.trim().to_string(),
+        server: settings.server.trim(),
+        nick: settings.nick.trim(),
         real_name: normalize_optional_field(settings.real_name),
         nickserv_password: normalize_optional_field(settings.nickserv_password),
         nickserv_account: normalize_optional_field(settings.nickserv_account),
     }
 }
 
-fn leak_string(value: String) -> &'static str {
-    Box::leak(value.into_boxed_str())
-}
-
-fn connect_client_from_settings(
-    settings: &ConnectionSettings,
-) -> Result<irc::Client<'static, TcpStream>, String> {
+fn connect_client_from_settings<'a>(
+    settings: ConnectionSettings<'a>,
+) -> Result<irc::Client<'a, TcpStream>, String> {
     if settings.server.is_empty() {
         return Err("Server cannot be empty".to_string());
     }
@@ -339,17 +335,17 @@ fn connect_client_from_settings(
 
     let auth = if let Some(password) = settings.nickserv_password.clone() {
         irc::Auth::NickServ {
-            account: settings.nickserv_account.clone().map(leak_string),
-            password: leak_string(password),
+            account: settings.nickserv_account,
+            password: (password),
         }
     } else {
         irc::Auth::None
     };
 
     let mut client = irc::Client {
-        server: leak_string(settings.server.clone()),
-        nick: leak_string(settings.nick.clone()),
-        real_name: settings.real_name.clone().map(leak_string),
+        server: (settings.server),
+        nick: (settings.nick),
+        real_name: settings.real_name,
         socket: tcpstream,
         auth,
         read_buffer: Vec::new(),
@@ -368,15 +364,17 @@ fn connect_client_from_settings(
 /// Run the main program
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // TODO: Implement Default for ConnectionSettings?
+    let nick = "uniquenickfortesting";
     let initial_settings = normalize_settings(ConnectionSettings {
-        server: env::var("IRC_SERVER").unwrap_or_else(|_| "irc.libera.chat:6667".to_string()),
-        nick: env::var("IRC_NICK").unwrap_or_else(|_| "uniquenick".to_string()),
-        real_name: env::var("IRC_REAL_NAME").ok(),
-        nickserv_password: env::var("IRC_NICKSERV_PASSWORD").ok(),
-        nickserv_account: env::var("IRC_NICKSERV_ACCOUNT").ok(),
+        server: "irc.libera.chat:6667",
+        nick: nick,
+        real_name: Some(""),
+        nickserv_password: Some(""),
+        nickserv_account: Some("")
     });
 
-    let client = connect_client_from_settings(&initial_settings).unwrap_or_else(|error| {
+    let client = connect_client_from_settings(initial_settings.clone()).unwrap_or_else(|error| {
         error!("Initial IRC setup failed: {error}");
         panic!("Initial IRC setup failed: {error}");
     });
@@ -396,7 +394,7 @@ pub fn run() {
             poll_events,
             get_joined_channels,
             get_connection_settings,
-            update_connection_settings
+            // update_connection_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
